@@ -1,7 +1,14 @@
-import { appSchema, tableSchema } from '@nozbe/watermelondb';
+import {
+  appSchema,
+  tableSchema,
+} from '@nozbe/watermelondb';
+import {
+  createTable,
+  schemaMigrations,
+} from '@nozbe/watermelondb/Schema/migrations';
 
 export const mySchema = appSchema({
-  version: 1,
+  version: 2,
   tables: [
     tableSchema({
       name: 'sales',
@@ -12,5 +19,31 @@ export const mySchema = appSchema({
         { name: 'synced', type: 'boolean', isOptional: true },
       ],
     }),
+    tableSchema({
+      name: 'products',
+      columns: [
+        { name: 'name', type: 'string' },
+        { name: 'price', type: 'number' },
+        { name: 'updated_at', type: 'number' },
+        { name: 'deleted', type: 'boolean' },
+      ],
+    }),
+  ],
+});
+
+export const myMigrations = schemaMigrations({
+  migrations: [
+    {
+      toVersion: 2,
+      steps: [createTable({
+        name: 'products',
+        columns: [
+          { name: 'name', type: 'string' },
+          { name: 'price', type: 'number' },
+          { name: 'updated_at', type: 'number' },
+          { name: 'deleted', type: 'boolean' },
+        ],
+      })],
+    },
   ],
 });

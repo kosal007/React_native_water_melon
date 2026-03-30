@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -10,31 +10,48 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { addSale } from '../database/salesActions';
 
 /**
  * AddSaleModal
  *
- * A form modal that writes a new Sale record to the local WatermelonDB
- * SQLite database. No network needed — this is fully offline-first.
+ * Product add/edit form modal.
  *
  * Props:
- *  visible  {boolean}  - controls modal visibility
- *  onClose  {Function} - called after save or cancel
+ *  visible        {boolean}  - controls modal visibility
+ *  onClose        {Function} - called after save or cancel
+ *  onSubmit       {Function} - receives { name, price }
+ *  initialProduct {Object?}  - existing product for edit
+ *  submitting     {boolean}  - parent processing state
  */
-export default function AddSaleModal({ visible, onClose }) {
-  const [productName, setProductName] = useState('');
-  const [quantity,    setQuantity]    = useState('');
-  const [price,       setPrice]       = useState('');
-  const [saving,      setSaving]      = useState(false);
-  const [error,       setError]       = useState('');
+export default function AddSaleModal({
+  visible,
+  onClose,
+  onSubmit,
+  initialProduct = null,
+  submitting = false,
+}) {
+  const [name, setName] = useState('');
+  const [price, setPrice] = useState('');
+  const [error, setError] = useState('');
+
+  const isEditing = Boolean(initialProduct);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    setName(initialProduct?.name ? String(initialProduct.name) : '');
+    setPrice(
+      typeof initialProduct?.price === 'number'
+        ? String(initialProduct.price)
+        : '',
+    );
+    setError('');
+  }, [visible, initialProduct]);
 
   function reset() {
-    setProductName('');
-    setQuantity('');
+    setName('');
     setPrice('');
     setError('');
-    setSaving(false);
   }
 
   function handleClose() {
@@ -43,32 +60,27 @@ export default function AddSaleModal({ visible, onClose }) {
   }
 
   async function handleSave() {
-    // ── Validation ─────────────────────────────────────────────────
-    if (!productName.trim()) {
-      setError('Product name is required.');
+    if (!name.trim()) {
+      setError('Name is required.');
       return;
     }
-    const qty = parseFloat(quantity);
+
     const prc = parseFloat(price);
-    if (isNaN(qty) || qty <= 0) {
-      setError('Quantity must be a positive number.');
-      return;
-    }
     if (isNaN(prc) || prc < 0) {
       setError('Price must be a valid number.');
       return;
     }
 
-    // ── Write to WatermelonDB ───────────────────────────────────────
     try {
-      setSaving(true);
       setError('');
-      await addSale(productName, qty, prc);
+      await onSubmit({
+        name: name.trim(),
+        price: prc,
+      });
       reset();
       onClose();
     } catch (e) {
-      setError('Failed to save. Please try again.');
-      setSaving(false);
+      setError('Failed to save product. Please try again.');
     }
   }
 
@@ -84,31 +96,18 @@ export default function AddSaleModal({ visible, onClose }) {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.sheet}>
-          {/* ── Title ──────────────────────────────────────────────── */}
-          <Text style={styles.title}>➕ Add Sale</Text>
+          <Text style={styles.title}>{isEditing ? '✏️ Edit Product' : '➕ Add Product'}</Text>
           <Text style={styles.subtitle}>
-            Saved locally in WatermelonDB (SQLite)
+            Offline-first: save local now, sync when online.
           </Text>
 
-          {/* ── Fields ─────────────────────────────────────────────── */}
-          <Text style={styles.label}>Product Name</Text>
+          <Text style={styles.label}>Name</Text>
           <TextInput
             style={styles.input}
             placeholder="e.g. iPhone 16 Pro"
             placeholderTextColor="#94a3b8"
-            value={productName}
-            onChangeText={setProductName}
-            returnKeyType="next"
-          />
-
-          <Text style={styles.label}>Quantity</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g. 3"
-            placeholderTextColor="#94a3b8"
-            value={quantity}
-            onChangeText={setQuantity}
-            keyboardType="decimal-pad"
+            value={name}
+            onChangeText={setName}
             returnKeyType="next"
           />
 
@@ -123,28 +122,28 @@ export default function AddSaleModal({ visible, onClose }) {
             returnKeyType="done"
           />
 
-          {/* ── Error ──────────────────────────────────────────────── */}
           {Boolean(error) && <Text style={styles.errorText}>{error}</Text>}
 
-          {/* ── Actions ────────────────────────────────────────────── */}
           <View style={styles.actions}>
             <TouchableOpacity
               style={styles.cancelBtn}
               onPress={handleClose}
-              disabled={saving}
+              disabled={submitting}
             >
               <Text style={styles.cancelBtnText}>Cancel</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+              style={[styles.saveBtn, submitting && styles.saveBtnDisabled]}
               onPress={handleSave}
-              disabled={saving}
+              disabled={submitting}
             >
-              {saving ? (
+              {submitting ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
-                <Text style={styles.saveBtnText}>Save Sale</Text>
+                <Text style={styles.saveBtnText}>
+                  {isEditing ? 'Update Product' : 'Save Product'}
+                </Text>
               )}
             </TouchableOpacity>
           </View>

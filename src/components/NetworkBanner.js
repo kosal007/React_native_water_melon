@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
-import { useNetworkStatus } from '../hook/useNetworkStatus';
+import { useNetworkStatus } from '../hook/useNetworkStatus.ts';
 
 const COLOR_ONLINE  = '#16a34a'; // green-700
 const COLOR_OFFLINE = '#dc2626'; // red-600
@@ -50,8 +50,8 @@ export default function NetworkBanner() {
   const statusLabel  = isOnline ? '● Online' : '● Offline';
 
   const hint = isOnline
-    ? `Connected via ${connectionType ?? 'network'} — data will sync automatically.`
-    : 'No internet connection — changes will be saved locally and synced when you reconnect.';
+    ? `Connected via ${connectionType ?? 'network'} — tap Push/Pull to sync.`
+    : 'No internet connection — changes are saved locally. Sync when back online.';
 
   return (
     <Animated.View

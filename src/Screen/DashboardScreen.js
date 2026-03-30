@@ -11,130 +11,97 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AddSaleModal from '../components/AddSaleModal';
 import NetworkBanner from '../components/NetworkBanner';
-import { deleteSale } from '../database/salesActions';
-import { useNetworkStatus } from '../hook/useNetworkStatus';
-import { useSales } from '../hook/useSales';
+import {
+  createLocalProduct,
+  deleteLocalProduct,
+  updateLocalProduct,
+} from '../database/productActions';
+import { useNetworkStatus } from '../hook/useNetworkStatus.ts';
+import { useProducts } from '../hook/useProducts';
+import { useProductSync } from '../hook/useProductSync.ts';
 
-// ─── CRM Section Data ──────────────────────────────────────────────────────────
-const CRM_SECTIONS = [
-  { key: 'contacts', label: 'Contacts',   icon: '👥', count: 142 },
-  { key: 'leads',    label: 'Leads',      icon: '🎯', count: 28  },
-  { key: 'deals',    label: 'Deals',      icon: '🤝', count: 9   },
-  { key: 'tasks',    label: 'Tasks',      icon: '✅', count: 17  },
-];
-
-// ─── SyncStatusCard ────────────────────────────────────────────────────────────
-function SyncStatusCard({ isOnline, isConnected }) {
-  const loading = isConnected === null;
-
-  const config = loading
-    ? { color: '#94a3b8', icon: '⏳', title: 'Checking connection…', body: '' }
+function SyncStatusCard({
+  isOnline,
+  syncing,
+  lastSyncAt,
+  syncError,
+  onPushNow,
+  onPullNow,
+}) {
+  const title = syncing
+    ? 'Syncing with backend...'
     : isOnline
-    ? {
-        color: '#22c55e',
-        icon: '✅',
-        title: 'All systems go',
-        body: 'Your data is syncing in real time. WatermelonDB changes will be pushed to the server automatically.',
-      }
-    : {
-        color: '#ef4444',
-        icon: '📴',
-        title: 'Offline mode active',
-        body: 'All edits are saved locally in WatermelonDB. They will sync automatically the moment connectivity is restored.',
-      };
+    ? 'Connected to backend'
+    : 'Offline mode active';
+
+  const description = syncing
+    ? 'Pulling and pushing product changes.'
+    : isOnline
+    ? 'Manual sync mode: tap Push or Pull when you want to sync.'
+    : 'Create, update, and delete work locally. Sync when you are online and tap a button.';
 
   return (
-    <View style={[styles.card, { borderLeftColor: config.color }]}>
+    <View style={[styles.card, { borderLeftColor: isOnline ? '#22c55e' : '#ef4444' }]}>
       <View style={styles.cardHeader}>
-        <Text style={styles.cardIcon}>{config.icon}</Text>
-        <Text style={[styles.cardTitle, { color: config.color }]}>
-          {config.title}
-        </Text>
+        <Text style={styles.cardIcon}>{syncing ? '⏳' : isOnline ? '✅' : '📴'}</Text>
+        <Text style={styles.cardTitle}>{title}</Text>
       </View>
-      {Boolean(config.body) && (
-        <Text style={styles.cardBody}>{config.body}</Text>
-      )}
-    </View>
-  );
-}
+      <Text style={styles.cardBody}>{description}</Text>
 
-// ─── ConnectionInfoCard ────────────────────────────────────────────────────────
-function ConnectionInfoCard({ connectionType, isInternetReachable }) {
-  const rows = [
-    { label: 'Type',               value: connectionType       ?? '—' },
-    { label: 'Internet Reachable', value: isInternetReachable === null
-        ? 'Checking…'
-        : isInternetReachable
-        ? 'Yes'
-        : 'No (captive portal or no route)' },
-  ];
-
-  return (
-    <View style={[styles.card, { borderLeftColor: '#6366f1' }]}>
-      <Text style={styles.sectionLabel}>Connection Details</Text>
-      {rows.map(({ label, value }) => (
-        <View key={label} style={styles.infoRow}>
-          <Text style={styles.infoLabel}>{label}</Text>
-          <Text style={styles.infoValue}>{String(value)}</Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-// ─── CRMCard ───────────────────────────────────────────────────────────────────
-function CRMCard({ icon, label, count, isOnline }) {
-  return (
-    <TouchableOpacity style={styles.crmCard} activeOpacity={0.75}>
-      <Text style={styles.crmIcon}>{icon}</Text>
-      <Text style={styles.crmCount}>{count}</Text>
-      <Text style={styles.crmLabel}>{label}</Text>
-      <Text style={styles.crmHint}>
-        {isOnline ? 'Live data' : 'Cached data'}
+      <Text style={styles.metaText}>
+        Last sync: {lastSyncAt ? new Date(lastSyncAt).toLocaleString() : 'Never'}
       </Text>
-    </TouchableOpacity>
+
+      {syncError ? (
+        <Text style={styles.errorText} numberOfLines={2}>
+          Sync error: {String(syncError?.message || syncError)}
+        </Text>
+      ) : null}
+
+      <View style={styles.syncActionsRow}>
+        <TouchableOpacity
+          style={[styles.syncNowBtn, (!isOnline || syncing) && styles.syncNowBtnDisabled]}
+          onPress={onPushNow}
+          disabled={!isOnline || syncing}
+        >
+          {syncing ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Text style={styles.syncNowBtnText}>Push</Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.syncNowBtn, (!isOnline || syncing) && styles.syncNowBtnDisabled]}
+          onPress={onPullNow}
+          disabled={!isOnline || syncing}
+        >
+          {syncing ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Text style={styles.syncNowBtnText}>Pull</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
-// ─── SaleRow ───────────────────────────────────────────────────────────────────
-function SaleRow({ sale }) {
-  const total = (sale.price * sale.quantity).toFixed(2);
-
-  async function handleDelete() {
-    try {
-      await deleteSale(sale);
-    } catch (e) {
-      console.warn('Delete failed', e);
-    }
-  }
-
+function ProductRow({ product, onEdit, onDelete }) {
   return (
     <View style={styles.saleRow}>
       <View style={styles.saleInfo}>
-        <Text style={styles.saleProduct}>{sale.productName}</Text>
-        <Text style={styles.saleMeta}>
-          {sale.quantity} × ${sale.price.toFixed(2)} ={' '}
-          <Text style={styles.saleTotal}>${total}</Text>
-        </Text>
+        <Text style={styles.saleProduct}>{product.name}</Text>
+        <Text style={styles.saleMeta}>${Number(product.price || 0).toFixed(2)}</Text>
       </View>
-      <View style={styles.saleRight}>
-        <View
-          style={[
-            styles.syncBadge,
-            { backgroundColor: sale.synced ? '#dcfce7' : '#fef9c3' },
-          ]}
-        >
-          <Text
-            style={[
-              styles.syncBadgeText,
-              { color: sale.synced ? '#16a34a' : '#b45309' },
-            ]}
-          >
-            {sale.synced ? '✓ Synced' : '⏳ Local'}
-          </Text>
-        </View>
-        <TouchableOpacity onPress={handleDelete} style={styles.deleteBtn}>
-          <Text style={styles.deleteBtnText}>🗑</Text>
+
+      <View style={styles.rowActions}>
+        <TouchableOpacity style={styles.editBtn} onPress={onEdit}>
+          <Text style={styles.editBtnText}>Edit</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.deleteBtn} onPress={onDelete}>
+          <Text style={styles.deleteBtnText}>Delete</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -143,10 +110,47 @@ function SaleRow({ sale }) {
 
 // ─── DashboardScreen ───────────────────────────────────────────────────────────
 export default function DashboardScreen() {
-  const { isConnected, isInternetReachable, connectionType, isOnline } =
-    useNetworkStatus();
-  const { sales, loading } = useSales();
+  const { isOnline } = useNetworkStatus();
+  const { products, loading } = useProducts();
+  const { syncing, lastSyncAt, syncError, syncNow } = useProductSync(isOnline);
+
   const [modalVisible, setModalVisible] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSaveProduct(values) {
+    setSubmitting(true);
+    try {
+      if (editingProduct) {
+        await updateLocalProduct(editingProduct, values);
+      } else {
+        await createLocalProduct(values);
+      }
+    } catch (error) {
+      console.error('Failed to save product:', error);
+      throw error;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleOpenAdd() {
+    setEditingProduct(null);
+    setModalVisible(true);
+  }
+
+  function handleOpenEdit(product) {
+    setEditingProduct(product);
+    setModalVisible(true);
+  }
+
+  async function handleDelete(product) {
+    try {
+      await deleteLocalProduct(product);
+    } catch (error) {
+      console.error('Failed to delete product:', error);
+    }
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -159,10 +163,9 @@ export default function DashboardScreen() {
         {/* ── Header ───────────────────────────────────────────────── */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.headerTitle}>CRM Dashboard</Text>
-            <Text style={styles.headerSub}>Welcome back 👋</Text>
+            <Text style={styles.headerTitle}>Products</Text>
+            <Text style={styles.headerSub}>Offline-first + Backend sync</Text>
           </View>
-          {/* Minimal live indicator dot in the header corner */}
           <View
             style={[
               styles.liveDot,
@@ -174,31 +177,23 @@ export default function DashboardScreen() {
         {/* ── Network Banner (reusable component) ──────────────────── */}
         <NetworkBanner />
 
-        {/* ── Sync Status Card ─────────────────────────────────────── */}
-        <SyncStatusCard isOnline={isOnline} isConnected={isConnected} />
-
-        {/* ── Connection Info ───────────────────────────────────────── */}
-        <ConnectionInfoCard
-          connectionType={connectionType}
-          isInternetReachable={isInternetReachable}
+        <SyncStatusCard
+          isOnline={isOnline}
+          syncing={syncing}
+          lastSyncAt={lastSyncAt}
+          syncError={syncError}
+          onPushNow={syncNow}
+          onPullNow={syncNow}
         />
 
-        {/* ── CRM Sections Grid ─────────────────────────────────────── */}
-        <Text style={styles.sectionLabel}>Modules</Text>
-        <View style={styles.grid}>
-          {CRM_SECTIONS.map(({ key, ...section }) => (
-            <CRMCard key={key} {...section} isOnline={isOnline} />
-          ))}
-        </View>
-
-        {/* ── Sales (WatermelonDB) ──────────────────────────────────── */}
+        {/* ── Products (WatermelonDB) ───────────────────────────────── */}
         <View style={styles.salesHeader}>
-          <Text style={styles.sectionLabel}>Sales Records (WatermelonDB)</Text>
+          <Text style={styles.sectionLabel}>Product List (WatermelonDB)</Text>
           <TouchableOpacity
             style={styles.addBtn}
-            onPress={() => setModalVisible(true)}
+            onPress={handleOpenAdd}
           >
-            <Text style={styles.addBtnText}>+ Add Sale</Text>
+            <Text style={styles.addBtnText}>+ Add Product</Text>
           </TouchableOpacity>
         </View>
 
@@ -208,21 +203,26 @@ export default function DashboardScreen() {
             color="#6366f1"
             size="large"
           />
-        ) : sales.length === 0 ? (
+        ) : products.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>📭</Text>
-            <Text style={styles.emptyText}>No sales yet.</Text>
+            <Text style={styles.emptyText}>No products yet.</Text>
             <Text style={styles.emptyHint}>
-              Tap "+ Add Sale" to write your first record to SQLite.
+              Tap "+ Add Product" to save locally.
             </Text>
           </View>
         ) : (
           <View style={styles.salesList}>
-            {sales.map((sale) => (
-              <SaleRow key={sale.id} sale={sale} />
+            {products.map((product) => (
+              <ProductRow
+                key={product.id}
+                product={product}
+                onEdit={() => handleOpenEdit(product)}
+                onDelete={() => handleDelete(product)}
+              />
             ))}
             <Text style={styles.salesCount}>
-              {sales.length} record{sales.length !== 1 ? 's' : ''} stored locally
+              {products.length} product{products.length !== 1 ? 's' : ''} in local database
             </Text>
           </View>
         )}
@@ -231,7 +231,13 @@ export default function DashboardScreen() {
       {/* ── Add Sale Modal ───────────────────────────────────────────── */}
       <AddSaleModal
         visible={modalVisible}
-        onClose={() => setModalVisible(false)}
+        onClose={() => {
+          setModalVisible(false);
+          setEditingProduct(null);
+        }}
+        onSubmit={handleSaveProduct}
+        initialProduct={editingProduct}
+        submitting={submitting}
       />
     </SafeAreaView>
   );
@@ -305,6 +311,7 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 15,
     fontWeight: '700',
+    color: '#0f172a',
   },
   cardBody: {
     marginTop: 6,
@@ -312,26 +319,40 @@ const styles = StyleSheet.create({
     color: '#475569',
     lineHeight: 19,
   },
-
-  // Connection info
-  infoRow: {
+  metaText: {
+    marginTop: 10,
+    fontSize: 12,
+    color: '#64748b',
+  },
+  errorText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#dc2626',
+  },
+  syncNowBtn: {
+    marginTop: 12,
+    backgroundColor: '#6366f1',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    minWidth: 96,
+    alignItems: 'center',
+  },
+  syncActionsRow: {
+    marginTop: 12,
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
+    alignItems: 'center',
+    gap: 8,
   },
-  infoLabel: {
-    fontSize: 13,
-    color: '#94a3b8',
+  syncNowBtnDisabled: {
+    backgroundColor: '#a5b4fc',
   },
-  infoValue: {
-    fontSize: 13,
-    color: '#334155',
-    fontWeight: '600',
-    maxWidth: '60%',
-    textAlign: 'right',
+  syncNowBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 12,
   },
 
-  // Section label
   sectionLabel: {
     fontSize: 11,
     fontWeight: '700',
@@ -413,20 +434,32 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 6,
   },
-  syncBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 20,
+  rowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  syncBadgeText: {
-    fontSize: 11,
+  editBtn: {
+    backgroundColor: '#e2e8f0',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  editBtnText: {
+    color: '#334155',
+    fontSize: 12,
     fontWeight: '700',
   },
   deleteBtn: {
-    padding: 4,
+    backgroundColor: '#fee2e2',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
   },
   deleteBtnText: {
-    fontSize: 16,
+    color: '#b91c1c',
+    fontSize: 12,
+    fontWeight: '700',
   },
   emptyState: {
     alignItems: 'center',
@@ -453,47 +486,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
 
-  // CRM grid
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 10,
-    marginTop: 4,
-  },
-  crmCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    width: '44%',
-    margin: '3%',
-    paddingVertical: 18,
-    paddingHorizontal: 14,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.07,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  crmIcon: {
-    fontSize: 28,
-    marginBottom: 6,
-  },
-  crmCount: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#1e293b',
-  },
-  crmLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#475569',
-    marginTop: 2,
-  },
-  crmHint: {
-    fontSize: 10,
-    color: '#94a3b8',
-    marginTop: 4,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
 });
